@@ -1,0 +1,33 @@
+CPU - Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz
+MinGW-w64 - OpenMP
+gcc -fopenmp matriz_cpu.c -o matriz_cpu.exe
+./matriz_cpu.exe
+
+GPU - 
+CUDA
+
+---------------------------------------------------
+
+Para analisar:
+- Tempo de Execução (Wall Time)
+omp_get_wtime() (CPU)
+cudaEventElapsedTime() (GPU)
+
+- Speedup (Aceleração)
+Tempocpu/Tempogpu
+
+- Eficiência da Paralelização
+Speedup/Número de Threads (ou Cores)
+
+- Uso da GPU e CPU
+Gerenciador de Tarefas (CPU)
+nvidia-smi (GPU)
+
+- Consumo de Energia (Eficiência Energética)
+Speedup/Energia Consumida
+nvidia-smi --query-gpu=power.draw --format=csv (GPU)
+
+- Overhead de Comunicação
+
+- Comparação para Diferentes Tamanhos de Entrada 
+N (512, 1024, 2048 e etc)
