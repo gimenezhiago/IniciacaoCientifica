@@ -1,19 +1,27 @@
+//Tempo de execução COM OPENMP e SEM OPENMP
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <omp.h>
 #include <windows.h> 
 
-#define NUM_TESTES 10  // Número de repetições para cálculo da média
+#define NUM_TESTES 10  // Número de repetições para média
 
-// Função para medir o uso de energia e CPU
-void medir_recursos() {
-    FILETIME idleTime, kernelTime, userTime;
-    GetSystemTimes(&idleTime, &kernelTime, &userTime);
-    printf("Uso de CPU (medido pelo Windows): OK\n");
+// Função de multiplicação de matrizes SEM OpenMP
+void multiply_matrices_seq(double **A, double **B, double **C, int N) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            C[i][j] = 0;
+            for (int k = 0; k < N; k++) {
+                C[i][j] += A[i][k] * B[k][j];
+            }
+        }
+    }
 }
 
-void multiply_matrices(double **A, double **B, double **C, int N) {
+// Função de multiplicação de matrizes COM OpenMP
+void multiply_matrices_omp(double **A, double **B, double **C, int N) {
     #pragma omp parallel for
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
@@ -48,20 +56,27 @@ int main() {
             for (int j = 0; j < N; j++)
                 A[i][j] = B[i][j] = rand() % 100;
 
-        double total_time = 0;
-        
+        double total_time_seq = 0, total_time_omp = 0;
+
+        // Executando SEM OpenMP
         for (int t = 0; t < NUM_TESTES; t++) {
             double start = omp_get_wtime();
-            multiply_matrices(A, B, C, N);
+            multiply_matrices_seq(A, B, C, N);
             double end = omp_get_wtime();
             double exec_time = end - start;
-            total_time += exec_time;
-            printf("Teste %d: %f segundos\n", t + 1, exec_time);
+            total_time_seq += exec_time;
+            printf("Teste %d (Sem OpenMP): %f segundos\n", t + 1, exec_time);
         }
 
-        double avg_time = total_time / NUM_TESTES;
-        printf("Tempo médio de execução na CPU para N=%d: %f segundos\n", N, avg_time);
-        medir_recursos();
+        // Executando COM OpenMP
+        for (int t = 0; t < NUM_TESTES; t++) {
+            double start = omp_get_wtime();
+            multiply_matrices_omp(A, B, C, N);
+            double end = omp_get_wtime();
+            double exec_time = end - start;
+            total_time_omp += exec_time;
+            printf("Teste %d (Com OpenMP): %f segundos\n", t + 1, exec_time);
+        }
 
         // Liberação da memória
         for (int i = 0; i < N; i++) {
@@ -73,5 +88,6 @@ int main() {
         free(B);
         free(C);
     }
+
     return 0;
 }
