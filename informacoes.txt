@@ -7,6 +7,9 @@ matriz_cpu.exe
 
 GPU - 
 CUDA
+nvcc -o matrix_mult matrix_mult.cu
+matrix_mult
+
 
 ---------------------------------------------------
 
