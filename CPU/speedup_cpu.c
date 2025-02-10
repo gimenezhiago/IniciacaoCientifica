@@ -4,6 +4,7 @@
 #include <omp.h>
 #include <windows.h>
 #include <psapi.h>
+#include <locale.h>
 
 #define NUM_TESTES 10
 
@@ -50,6 +51,32 @@ double get_cpu_usage() {
     return 0.0;
 }
 
+// Função para obter o TSC (Time-Stamp Counter)
+unsigned long long get_tsc() {
+    unsigned int low, high;
+    __asm__ __volatile__("rdtsc" : "=a" (low), "=d" (high));
+    return ((unsigned long long)high << 32) | low;
+}
+
+// Função para calcular a frequência da CPU
+double calculate_cpu_frequency() {
+    unsigned long long start, end;
+    LARGE_INTEGER freq, start_time, end_time;
+
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start_time);
+    start = get_tsc();
+
+    Sleep(100); // Aguarde 100 milissegundos
+
+    end = get_tsc();
+    QueryPerformanceCounter(&end_time);
+
+    double elapsed_time = (double)(end_time.QuadPart - start_time.QuadPart) / freq.QuadPart;
+    double cpu_frequency = (double)(end - start) / (elapsed_time * 1e6); // Frequência em MHz
+    return cpu_frequency;
+}
+
 // Multiplicação de matrizes SEM OpenMP
 void multiply_matrices_seq(double **A, double **B, double **C, int N) {
     for (int i = 0; i < N; i++) {
@@ -76,6 +103,9 @@ void multiply_matrices_omp(double **A, double **B, double **C, int N) {
 }
 
 int main() {
+    // Configurar ambiente de localização para suportar caracteres especiais
+    setlocale(LC_ALL, "Portuguese_Brazil.1252");
+
     int tamanhos[] = {512, 1024, 2048};
     int num_tamanhos = sizeof(tamanhos) / sizeof(tamanhos[0]);
 
@@ -92,31 +122,42 @@ int main() {
             C[i] = (double *)malloc(N * sizeof(double));
         }
 
-        srand(time(NULL));
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < N; j++)
-                A[i][j] = B[i][j] = rand() % 100;
-
         double total_time_seq = 0, total_time_omp = 0;
 
         for (int t = 0; t < NUM_TESTES; t++) {
-            double start = omp_get_wtime();
+            srand(1); // Semente fixa para números aleatórios
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < N; j++)
+                    A[i][j] = B[i][j] = rand() % 100;
+
+            LARGE_INTEGER start, end, freq;
+            QueryPerformanceFrequency(&freq);
+            QueryPerformanceCounter(&start);
             multiply_matrices_seq(A, B, C, N);
-            double end = omp_get_wtime();
-            double exec_time = end - start;
+            QueryPerformanceCounter(&end);
+            double exec_time = (double)(end.QuadPart - start.QuadPart) / freq.QuadPart;
+            double cpu_frequency = calculate_cpu_frequency();
+            printf("Teste %d (Sem OpenMP): %f segundos | Memoria: %.2f MB | CPU: %.2f%% | Frequencia: %.2f MHz\n", 
+                   t + 1, exec_time, get_memory_usage(), get_cpu_usage(), cpu_frequency);
             total_time_seq += exec_time;
-            printf("Teste %d (Sem OpenMP): %f segundos | Memória: %.2f MB | CPU: %.2f%%\n", 
-                   t + 1, exec_time, get_memory_usage(), get_cpu_usage());
         }
 
         for (int t = 0; t < NUM_TESTES; t++) {
-            double start = omp_get_wtime();
+            srand(1); // Semente fixa para números aleatórios
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < N; j++)
+                    A[i][j] = B[i][j] = rand() % 100;
+
+            LARGE_INTEGER start, end, freq;
+            QueryPerformanceFrequency(&freq);
+            QueryPerformanceCounter(&start);
             multiply_matrices_omp(A, B, C, N);
-            double end = omp_get_wtime();
-            double exec_time = end - start;
+            QueryPerformanceCounter(&end);
+            double exec_time = (double)(end.QuadPart - start.QuadPart) / freq.QuadPart;
+            double cpu_frequency = calculate_cpu_frequency();
+            printf("Teste %d (Com OpenMP): %f segundos | Memoria: %.2f MB | CPU: %.2f%% | Frequencia: %.2f MHz\n", 
+                   t + 1, exec_time, get_memory_usage(), get_cpu_usage(), cpu_frequency);
             total_time_omp += exec_time;
-            printf("Teste %d (Com OpenMP): %f segundos | Memória: %.2f MB | CPU: %.2f%%\n", 
-                   t + 1, exec_time, get_memory_usage(), get_cpu_usage());
         }
 
         for (int i = 0; i < N; i++) {
