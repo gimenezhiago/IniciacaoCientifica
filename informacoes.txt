@@ -1,6 +1,7 @@
 CPU - Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz
 MinGW-w64 - OpenMP
 gcc balanceamentoCarga_cpu.c -o balanceamentoCarga_cpu -fopenmp -O3
+gcc -o matriz_cpu_linux matriz_cpu_linux.c -fopenmp -lpthread
 matriz_cpu.exe
 
 
