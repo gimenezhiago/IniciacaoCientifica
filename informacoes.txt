@@ -9,6 +9,7 @@ matriz_cpu.exe
 GPU - 
 CUDA
 nvcc -o matrix_mult matrix_mult.cu
+gcc matrix_mul_opencl.c -o matrix_mul_opencl -lOpenCL -O2
 matrix_mult
 
 
