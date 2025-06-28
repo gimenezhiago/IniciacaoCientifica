@@ -8,16 +8,18 @@ int N;
 double **A, **B, **C;
 int num_threads;
 
+// Função para obter tempo atual em segundos
 double get_time() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return tv.tv_sec + tv.tv_usec / 1e6;
 }
 
+// Funções auxiliares
 double **allocate_matrix(int size) {
     double **matrix = (double **)malloc(size * sizeof(double *));
     for (int i = 0; i < size; i++)
-        matrix[i] = (double *)calloc(size, sizeof(double));
+        matrix[i] = (double *)malloc(size * sizeof(double));
     return matrix;
 }
 
@@ -27,21 +29,21 @@ void free_matrix(double **matrix, int size) {
     free(matrix);
 }
 
-void add_matrix(double **A, double **B, double **C, int size) {
+void add(double **A, double **B, double **C, int size) {
     for (int i = 0; i < size; i++)
         for (int j = 0; j < size; j++)
             C[i][j] = A[i][j] + B[i][j];
 }
 
-void sub_matrix(double **A, double **B, double **C, int size) {
+void subtract(double **A, double **B, double **C, int size) {
     for (int i = 0; i < size; i++)
         for (int j = 0; j < size; j++)
             C[i][j] = A[i][j] - B[i][j];
 }
 
-void strassen(double **A, double **B, double **C, int size) {
-    if (size <= 64) {
-        #pragma omp parallel for num_threads(num_threads)
+// Função Strassen paralela
+void strassen_omp(double **A, double **B, double **C, int size) {
+    if (size <= 2) {
         for (int i = 0; i < size; i++)
             for (int j = 0; j < size; j++) {
                 C[i][j] = 0;
@@ -65,6 +67,7 @@ void strassen(double **A, double **B, double **C, int size) {
     double **C12 = allocate_matrix(newSize);
     double **C21 = allocate_matrix(newSize);
     double **C22 = allocate_matrix(newSize);
+
     double **M1 = allocate_matrix(newSize);
     double **M2 = allocate_matrix(newSize);
     double **M3 = allocate_matrix(newSize);
@@ -72,40 +75,79 @@ void strassen(double **A, double **B, double **C, int size) {
     double **M5 = allocate_matrix(newSize);
     double **M6 = allocate_matrix(newSize);
     double **M7 = allocate_matrix(newSize);
-    double **T1 = allocate_matrix(newSize);
-    double **T2 = allocate_matrix(newSize);
+    double **AResult = allocate_matrix(newSize);
+    double **BResult = allocate_matrix(newSize);
 
+    // Dividir em submatrizes
     for (int i = 0; i < newSize; i++)
         for (int j = 0; j < newSize; j++) {
             A11[i][j] = A[i][j];
             A12[i][j] = A[i][j + newSize];
             A21[i][j] = A[i + newSize][j];
             A22[i][j] = A[i + newSize][j + newSize];
-
             B11[i][j] = B[i][j];
             B12[i][j] = B[i][j + newSize];
             B21[i][j] = B[i + newSize][j];
             B22[i][j] = B[i + newSize][j + newSize];
         }
 
-    strassen(A11, B11, M1, newSize);   // M1 = (A11 + A22)(B11 + B22)
-    strassen(A21, B11, M2, newSize);   // M2 = (A21 + A22)B11
-    strassen(A11, B12, M3, newSize);   // M3 = A11(B12 - B22)
-    strassen(A22, B21, M4, newSize);   // M4 = A22(B21 - B11)
-    strassen(A11, B22, M5, newSize);   // M5 = (A11 + A12)B22
-    strassen(A21, B12, M6, newSize);   // M6 = (A21 - A11)(B11 + B12)
-    strassen(A12, B21, M7, newSize);   // M7 = (A12 - A22)(B21 + B22)
+    // Seções paralelas para M1 a M7
+    #pragma omp parallel sections num_threads(num_threads)
+    {
+        #pragma omp section
+        {
+            add(A11, A22, AResult, newSize);
+            add(B11, B22, BResult, newSize);
+            strassen_omp(AResult, BResult, M1, newSize);
+        }
+        #pragma omp section
+        {
+            add(A21, A22, AResult, newSize);
+            strassen_omp(AResult, B11, M2, newSize);
+        }
+        #pragma omp section
+        {
+            subtract(B12, B22, BResult, newSize);
+            strassen_omp(A11, BResult, M3, newSize);
+        }
+        #pragma omp section
+        {
+            subtract(B21, B11, BResult, newSize);
+            strassen_omp(A22, BResult, M4, newSize);
+        }
+        #pragma omp section
+        {
+            add(A11, A12, AResult, newSize);
+            strassen_omp(AResult, B22, M5, newSize);
+        }
+        #pragma omp section
+        {
+            subtract(A21, A11, AResult, newSize);
+            add(B11, B12, BResult, newSize);
+            strassen_omp(AResult, BResult, M6, newSize);
+        }
+        #pragma omp section
+        {
+            subtract(A12, A22, AResult, newSize);
+            add(B21, B22, BResult, newSize);
+            strassen_omp(AResult, BResult, M7, newSize);
+        }
+    }
 
-    add_matrix(M1, M4, T1, newSize);
-    sub_matrix(T1, M5, T2, newSize);
-    add_matrix(T2, M7, C11, newSize);
+    // Combinar submatrizes
+    double **temp1 = allocate_matrix(newSize);
+    double **temp2 = allocate_matrix(newSize);
 
-    add_matrix(M3, M5, C12, newSize);
-    add_matrix(M2, M4, C21, newSize);
+    add(M1, M4, temp1, newSize);
+    subtract(temp1, M5, temp2, newSize);
+    add(temp2, M7, C11, newSize);
 
-    sub_matrix(M1, M2, T1, newSize);
-    add_matrix(T1, M3, T2, newSize);
-    add_matrix(T2, M6, C22, newSize);
+    add(M3, M5, C12, newSize);
+    add(M2, M4, C21, newSize);
+
+    subtract(M1, M2, temp1, newSize);
+    add(temp1, M3, temp2, newSize);
+    add(temp2, M6, C22, newSize);
 
     for (int i = 0; i < newSize; i++)
         for (int j = 0; j < newSize; j++) {
@@ -115,12 +157,18 @@ void strassen(double **A, double **B, double **C, int size) {
             C[i + newSize][j + newSize] = C22[i][j];
         }
 
-    // Liberação
-    free_matrix(A11, newSize); free_matrix(A12, newSize); free_matrix(A21, newSize); free_matrix(A22, newSize);
-    free_matrix(B11, newSize); free_matrix(B12, newSize); free_matrix(B21, newSize); free_matrix(B22, newSize);
-    free_matrix(C11, newSize); free_matrix(C12, newSize); free_matrix(C21, newSize); free_matrix(C22, newSize);
-    free_matrix(M1, newSize);  free_matrix(M2, newSize);  free_matrix(M3, newSize);  free_matrix(M4, newSize);
-    free_matrix(M5, newSize);  free_matrix(M6, newSize);  free_matrix(M7, newSize);  free_matrix(T1, newSize);  free_matrix(T2, newSize);
+    free_matrix(A11, newSize); free_matrix(A12, newSize);
+    free_matrix(A21, newSize); free_matrix(A22, newSize);
+    free_matrix(B11, newSize); free_matrix(B12, newSize);
+    free_matrix(B21, newSize); free_matrix(B22, newSize);
+    free_matrix(C11, newSize); free_matrix(C12, newSize);
+    free_matrix(C21, newSize); free_matrix(C22, newSize);
+    free_matrix(M1, newSize); free_matrix(M2, newSize);
+    free_matrix(M3, newSize); free_matrix(M4, newSize);
+    free_matrix(M5, newSize); free_matrix(M6, newSize);
+    free_matrix(M7, newSize); free_matrix(AResult, newSize);
+    free_matrix(BResult, newSize); free_matrix(temp1, newSize);
+    free_matrix(temp2, newSize);
 }
 
 int main(int argc, char *argv[]) {
@@ -133,7 +181,7 @@ int main(int argc, char *argv[]) {
     num_threads = atoi(argv[2]);
 
     if ((N & (N - 1)) != 0) {
-        printf("Erro: o tamanho da matriz deve ser uma potência de 2 (ex: 256, 512, 1024...)\n");
+        printf("Erro: o tamanho da matriz deve ser potência de 2.\n");
         return 1;
     }
 
@@ -147,9 +195,10 @@ int main(int argc, char *argv[]) {
             A[i][j] = B[i][j] = rand() % 100;
 
     double start = get_time();
-    strassen(A, B, C, N);
+    strassen_omp(A, B, C, N);
     double end = get_time();
-    printf("Strassen com OpenMP (%d threads): Tempo = %.4f s\n", num_threads, end - start);
+
+    printf("Strassen + OpenMP (%d threads): Tempo = %.4f s\n", num_threads, end - start);
 
     free_matrix(A, N);
     free_matrix(B, N);
