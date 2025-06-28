@@ -6,7 +6,7 @@
 // Variáveis globais
 int N;
 double **A, **B, **C;
-int num_threads = 7; // 7 chamadas independentes no Strassen
+int num_threads = N
 
 typedef struct {
     double **A;
