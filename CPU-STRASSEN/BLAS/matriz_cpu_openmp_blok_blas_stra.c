@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <omp.h>
-#include <immintrin.h> // Para SIMD AVX
+#include <cblas.h> // ✅ BLAS
 
 // Variáveis globais
 int N;
@@ -20,7 +20,7 @@ double get_time() {
 double **allocate_matrix(int size) {
     double **matrix = (double **)malloc(size * sizeof(double *));
     for (int i = 0; i < size; i++)
-        matrix[i] = (double *)malloc(size * sizeof(double));
+        matrix[i] = (double *)calloc(size, sizeof(double));
     return matrix;
 }
 
@@ -42,45 +42,42 @@ void subtract(double **A, double **B, double **C, int size) {
             C[i][j] = A[i][j] - B[i][j];
 }
 
-// Multiplicação com Blocking + SIMD AVX + OpenMP
+// ✅ Multiplicação com BLAS
 void multiply_blocking(double **A, double **B, double **C, int size, int block_size) {
-    #pragma omp parallel for collapse(2) num_threads(num_threads)
-    for (int i = 0; i < size; i++)
-        for (int j = 0; j < size; j++)
-            C[i][j] = 0.0;
-
     #pragma omp parallel for collapse(2) num_threads(num_threads)
     for (int ii = 0; ii < size; ii += block_size) {
         for (int jj = 0; jj < size; jj += block_size) {
             for (int kk = 0; kk < size; kk += block_size) {
-                for (int i = ii; i < ii + block_size && i < size; i++) {
-                    for (int j = jj; j < jj + block_size && j < size; j++) {
+                int M = (ii + block_size > size) ? (size - ii) : block_size;
+                int N_ = (jj + block_size > size) ? (size - jj) : block_size;
+                int K = (kk + block_size > size) ? (size - kk) : block_size;
 
-                        __m256d sum_vec = _mm256_setzero_pd();
-                        int k;
-                        for (k = kk; k <= kk + block_size - 4 && k + 3 < size; k += 4) {
-                            __m256d a_vec = _mm256_loadu_pd(&A[i][k]);
-                            __m256d b_vec = _mm256_set_pd(
-                                B[k+3][j], B[k+2][j], B[k+1][j], B[k][j]
-                            );
+                // Converte blocos para 1D temporários
+                double *A_block = malloc(M * K * sizeof(double));
+                double *B_block = malloc(K * N_ * sizeof(double));
+                double *C_block = calloc(M * N_, sizeof(double));
 
-                            // ✅ Substituído FMA por MUL + ADD para usar só -mavx
-                            __m256d mul_vec = _mm256_mul_pd(a_vec, b_vec);
-                            sum_vec = _mm256_add_pd(sum_vec, mul_vec);
-                        }
+                for (int i = 0; i < M; i++)
+                    for (int k = 0; k < K; k++)
+                        A_block[i*K + k] = A[ii + i][kk + k];
 
-                        double sum_arr[4];
-                        _mm256_storeu_pd(sum_arr, sum_vec);
-                        double sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+                for (int k = 0; k < K; k++)
+                    for (int j = 0; j < N_; j++)
+                        B_block[k*N_ + j] = B[kk + k][jj + j];
 
-                        for (; k < kk + block_size && k < size; k++) {
-                            sum += A[i][k] * B[k][j];
-                        }
+                // Multiplica usando BLAS
+                cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                            M, N_, K, 1.0, A_block, K, B_block, N_, 1.0, C_block, N_);
 
+                // Copia resultado para matriz C global
+                for (int i = 0; i < M; i++)
+                    for (int j = 0; j < N_; j++)
                         #pragma omp atomic
-                        C[i][j] += sum;
-                    }
-                }
+                        C[ii + i][jj + j] += C_block[i*N_ + j];
+
+                free(A_block);
+                free(B_block);
+                free(C_block);
             }
         }
     }
@@ -132,43 +129,19 @@ void strassen_omp(double **A, double **B, double **C, int size) {
     #pragma omp parallel sections num_threads(num_threads)
     {
         #pragma omp section
-        {
-            add(A11, A22, AResult, newSize);
-            add(B11, B22, BResult, newSize);
-            strassen_omp(AResult, BResult, M1, newSize);
-        }
+        { add(A11, A22, AResult, newSize); add(B11, B22, BResult, newSize); strassen_omp(AResult, BResult, M1, newSize); }
         #pragma omp section
-        {
-            add(A21, A22, AResult, newSize);
-            strassen_omp(AResult, B11, M2, newSize);
-        }
+        { add(A21, A22, AResult, newSize); strassen_omp(AResult, B11, M2, newSize); }
         #pragma omp section
-        {
-            subtract(B12, B22, BResult, newSize);
-            strassen_omp(A11, BResult, M3, newSize);
-        }
+        { subtract(B12, B22, BResult, newSize); strassen_omp(A11, BResult, M3, newSize); }
         #pragma omp section
-        {
-            subtract(B21, B11, BResult, newSize);
-            strassen_omp(A22, BResult, M4, newSize);
-        }
+        { subtract(B21, B11, BResult, newSize); strassen_omp(A22, BResult, M4, newSize); }
         #pragma omp section
-        {
-            add(A11, A12, AResult, newSize);
-            strassen_omp(AResult, B22, M5, newSize);
-        }
+        { add(A11, A12, AResult, newSize); strassen_omp(AResult, B22, M5, newSize); }
         #pragma omp section
-        {
-            subtract(A21, A11, AResult, newSize);
-            add(B11, B12, BResult, newSize);
-            strassen_omp(AResult, BResult, M6, newSize);
-        }
+        { subtract(A21, A11, AResult, newSize); add(B11, B12, BResult, newSize); strassen_omp(AResult, BResult, M6, newSize); }
         #pragma omp section
-        {
-            subtract(A12, A22, AResult, newSize);
-            add(B21, B22, BResult, newSize);
-            strassen_omp(AResult, BResult, M7, newSize);
-        }
+        { subtract(A12, A22, AResult, newSize); add(B21, B22, BResult, newSize); strassen_omp(AResult, BResult, M7, newSize); }
     }
 
     double **temp1 = allocate_matrix(newSize);
@@ -235,8 +208,8 @@ int main(int argc, char *argv[]) {
     strassen_omp(A, B, C, N);
     double end = get_time();
 
-    printf("Strassen + OpenMP + Blocking + SIMD AVX (%d threads, block_size = %d): Tempo = %.4f s\n",
-           num_threads, block_size, end - start);
+    printf("Strassen + OpenMP + BLAS (block_size = %d, threads = %d): %.4f s\n",
+           block_size, num_threads, end - start);
 
     free_matrix(A, N);
     free_matrix(B, N);

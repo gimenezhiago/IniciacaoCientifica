@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
-#include <immintrin.h>  // Para AVX
+#include <cblas.h>  // ✅ Para BLAS
 
 int N;
 int block_size;
@@ -45,39 +45,50 @@ void subtract(double **A, double **B, double **C, int size) {
             C[i][j] = A[i][j] - B[i][j];
 }
 
-// ✅ Multiplicação com blocking + AVX (somente -mavx)
+// ✅ Multiplicação com Blocking + BLAS (sem SIMD)
 void multiply_blocking(double **A, double **B, double **C, int size, int block_size) {
     for (int i = 0; i < size; i++)
         for (int j = 0; j < size; j++)
             C[i][j] = 0.0;
 
-    for (int ii = 0; ii < size; ii += block_size)
-        for (int jj = 0; jj < size; jj += block_size)
-            for (int kk = 0; kk < size; kk += block_size)
-                for (int i = ii; i < ii + block_size && i < size; i++)
-                    for (int j = jj; j < jj + block_size && j < size; j++) {
+    for (int ii = 0; ii < size; ii += block_size) {
+        for (int jj = 0; jj < size; jj += block_size) {
+            for (int kk = 0; kk < size; kk += block_size) {
 
-                        __m256d sum_vec = _mm256_setzero_pd();
-                        int k;
-                        for (k = kk; k <= kk + block_size - 4 && k + 3 < size; k += 4) {
-                            __m256d a_vec = _mm256_loadu_pd(&A[i][k]);
-                            __m256d b_vec = _mm256_set_pd(
-                                B[k+3][j], B[k+2][j], B[k+1][j], B[k][j]
-                            );
-                            // ✅ Troca FMA por MUL + ADD (só -mavx)
-                            __m256d mul_vec = _mm256_mul_pd(a_vec, b_vec);
-                            sum_vec = _mm256_add_pd(sum_vec, mul_vec);
-                        }
+                int M = (ii + block_size > size) ? size - ii : block_size;
+                int N = (jj + block_size > size) ? size - jj : block_size;
+                int K = (kk + block_size > size) ? size - kk : block_size;
 
-                        double sum_arr[4];
-                        _mm256_storeu_pd(sum_arr, sum_vec);
-                        double sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+                // BLAS espera vetores contínuos. Copie blocos para buffers:
+                double *Ablock = malloc(M * K * sizeof(double));
+                double *Bblock = malloc(K * N * sizeof(double));
+                double *Cblock = calloc(M * N, sizeof(double));
 
-                        for (; k < kk + block_size && k < size; k++)
-                            sum += A[i][k] * B[k][j];
+                // Copia blocos A[ii:ii+M][kk:kk+K]
+                for (int i = 0; i < M; i++)
+                    for (int k = 0; k < K; k++)
+                        Ablock[i*K + k] = A[ii + i][kk + k];
 
-                        C[i][j] += sum;
-                    }
+                // Copia blocos B[kk:kk+K][jj:jj+N]
+                for (int k = 0; k < K; k++)
+                    for (int j = 0; j < N; j++)
+                        Bblock[k*N + j] = B[kk + k][jj + j];
+
+                // Multiplica com cblas_dgemm
+                cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                            M, N, K, 1.0, Ablock, K, Bblock, N, 1.0, Cblock, N);
+
+                // Acumula resultado em C[ii:ii+M][jj:jj+N]
+                for (int i = 0; i < M; i++)
+                    for (int j = 0; j < N; j++)
+                        C[ii + i][jj + j] += Cblock[i*N + j];
+
+                free(Ablock);
+                free(Bblock);
+                free(Cblock);
+            }
+        }
+    }
 }
 
 void strassen(double **A, double **B, double **C, int size);
@@ -234,7 +245,7 @@ int main(int argc, char *argv[]) {
     double start = get_time();
     strassen(A, B, C, N);
     double end = get_time();
-    printf("Strassen Pthreads + Blocking + SIMD AVX (block_size = %d): %.4f s\n", block_size, end - start);
+    printf("Strassen Pthreads + Blocking + BLAS (block_size = %d): %.4f s\n", block_size, end - start);
 
     free_matrix(A, N);
     free_matrix(B, N);
