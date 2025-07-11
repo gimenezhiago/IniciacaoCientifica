@@ -2,7 +2,10 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
-#include <Eigen/Dense>  // ✅ Troca BLAS por Eigeni
+#include <Eigen/Dense>
+#include <iostream>
+
+using namespace Eigen;
 
 int N;
 int block_size;
@@ -21,9 +24,9 @@ double get_time() {
 }
 
 double **allocate_matrix(int size) {
-    double **matrix = malloc(size * sizeof(double *));
+    double **matrix = (double **) malloc(size * sizeof(double *));
     for (int i = 0; i < size; i++) {
-        matrix[i] = calloc(size, sizeof(double));
+        matrix[i] = (double *) calloc(size, sizeof(double));
     }
     return matrix;
 }
@@ -45,7 +48,7 @@ void subtract(double **A, double **B, double **C, int size) {
             C[i][j] = A[i][j] - B[i][j];
 }
 
-// ✅ Multiplicação com Blocking + EIGEN (sem BLAS)
+// ✅ Multiplicação com Blocking + Eigen
 void multiply_blocking(double **A, double **B, double **C, int size, int block_size) {
     for (int i = 0; i < size; i++)
         for (int j = 0; j < size; j++)
@@ -59,28 +62,24 @@ void multiply_blocking(double **A, double **B, double **C, int size, int block_s
                 int N_ = (jj + block_size > size) ? size - jj : block_size;
                 int K = (kk + block_size > size) ? size - kk : block_size;
 
-                double *Ablock = malloc(M * K * sizeof(double));
-                double *Bblock = malloc(K * N_ * sizeof(double));
-                double *Cblock = calloc(M * N_, sizeof(double));
+                double *Ablock = (double *) malloc(M * K * sizeof(double));
+                double *Bblock = (double *) malloc(K * N_ * sizeof(double));
+                double *Cblock = (double *) calloc(M * N_, sizeof(double));
 
-                // Copia blocos A[ii:ii+M][kk:kk+K]
                 for (int i = 0; i < M; i++)
                     for (int k = 0; k < K; k++)
                         Ablock[i*K + k] = A[ii + i][kk + k];
 
-                // Copia blocos B[kk:kk+K][jj:jj+N]
                 for (int k = 0; k < K; k++)
                     for (int j = 0; j < N_; j++)
                         Bblock[k*N_ + j] = B[kk + k][jj + j];
 
-                // ✅ Multiplica blocos usando Eigen
-                Eigen::Map<Eigen::MatrixXd> A_eigen(Ablock, M, K);
-                Eigen::Map<Eigen::MatrixXd> B_eigen(Bblock, K, N_);
-                Eigen::Map<Eigen::MatrixXd> C_eigen(Cblock, M, N_);
+                Map<MatrixXd> A_eigen(Ablock, M, K);
+                Map<MatrixXd> B_eigen(Bblock, K, N_);
+                Map<MatrixXd> C_eigen(Cblock, M, N_);
 
                 C_eigen.noalias() += A_eigen * B_eigen;
 
-                // Acumula resultado no bloco C global
                 for (int i = 0; i < M; i++)
                     for (int j = 0; j < N_; j++)
                         C[ii + i][jj + j] += Cblock[i*N_ + j];
@@ -231,7 +230,7 @@ int main(int argc, char *argv[]) {
     block_size = atoi(argv[2]);
 
     if ((N & (N - 1)) != 0) {
-        printf("Erro: tamanho deve ser potência de 2.\n");
+        printf("Erro: tamanho da matriz deve ser potência de 2.\n");
         return 1;
     }
 
@@ -247,6 +246,7 @@ int main(int argc, char *argv[]) {
     double start = get_time();
     strassen(A, B, C, N);
     double end = get_time();
+
     printf("Strassen Pthreads + Blocking + Eigen (block_size = %d): %.4f s\n", block_size, end - start);
 
     free_matrix(A, N);

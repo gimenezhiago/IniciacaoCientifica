@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <omp.h>
-#include <Eigen/Dense>  // ✅ Substitui BLAS
+#include <Eigen/Dense>
+
+using namespace Eigen;
 
 // Variáveis globais
 int N;
@@ -52,9 +54,9 @@ void multiply_blocking(double **A, double **B, double **C, int size, int block_s
                 int N_ = (jj + block_size > size) ? (size - jj) : block_size;
                 int K = (kk + block_size > size) ? (size - kk) : block_size;
 
-                double *A_block = malloc(M * K * sizeof(double));
-                double *B_block = malloc(K * N_ * sizeof(double));
-                double *C_block = calloc(M * N_, sizeof(double));
+                double *A_block = (double*) malloc(M * K * sizeof(double));
+                double *B_block = (double*) malloc(K * N_ * sizeof(double));
+                double *C_block = (double*) calloc(M * N_, sizeof(double));
 
                 // Copia blocos para 1D
                 for (int i = 0; i < M; i++)
@@ -66,9 +68,9 @@ void multiply_blocking(double **A, double **B, double **C, int size, int block_s
                         B_block[k*N_ + j] = B[kk + k][jj + j];
 
                 // ✅ Usa Eigen para multiplicação do bloco
-                Eigen::Map<Eigen::MatrixXd> A_eigen(A_block, M, K);
-                Eigen::Map<Eigen::MatrixXd> B_eigen(B_block, K, N_);
-                Eigen::Map<Eigen::MatrixXd> C_eigen(C_block, M, N_);
+                Map<MatrixXd> A_eigen(A_block, M, K);
+                Map<MatrixXd> B_eigen(B_block, K, N_);
+                Map<MatrixXd> C_eigen(C_block, M, N_);
 
                 C_eigen.noalias() += A_eigen * B_eigen;
 
