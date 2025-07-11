@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
-#include <Eigen/Dense>  // ✅ Troca BLAS por Eigen
+#include <Eigen/Dense>  // ✅ Troca BLAS por Eigeni
 
 int N;
 int block_size;
